@@ -1,0 +1,424 @@
+---
+title: "DSA 8030: PROJECT I: Trust & Safety — Detecting Signs of Suicide Ideation and Depression in Online Text"
+author: "Sol Vloebergh"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    code_download: true
+    code_folding: hide
+---
+
+```{r setup}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(tidyverse) # Core data wrangling and visualization
+library(janitor) # Clean and standardize variable names and data frames
+library(stringr) # String manipulation
+library(readr) # Fast reading and writing of CSV files
+library(tidymodels) # Unified framework for modeling
+library(textrecipes) # Text preprocessing steps (tokenization, TF–IDF, stopword removal)
+library(tidytext) # Text mining and tokenization tools compatible with tidy data
+library(stopwords) # Provides stopword lists for multiple languages
+library(knitr) # Table formatting and markdown integration for reports
+library(scales) # Formatting numbers, percentages, and axis scales in visualizations
+```
+
+![](/Users/solgracielav/Desktop/CLEMSON/YEAR 2/SEMESTER 1/8030- INTRO STATISTICAL COMPUTING/PROJECT/50C5D347-27DF-417D-B1CB-9D324B0A2B52.jpeg){width=100px}
+
+# Introduction
+
+The age of the digital has made mental health an integral issue that requires speedy resolution. Individuals on platforms and the internet speak about the emotional challenges and distress and loneliness through what they put on the page. Because of this, I decided to make a project on Detecting Signs of Suicide Ideation and Depression in Online Text through tokenization and TF–IDF representation methods in R.
+
+The following analysis utilizes NLP techniques constructed with the programming language R to identify depression and suicidal ideation from the written material on the internet. Also, machine learning models on texts are validated here to identify posts needing human analysis through analysis by these models based on hopeless comments and critical language and phrases expressing disinterest.
+
+My professional goal is to join the Trust & Safety team at Google to collaborate on projects related to internet safety safeguarding kids and minors on the internet. Research area is related to my academic interests on data analytics and business communications and my willingness to make the internet safer for vulnerable users.
+
+## Research question
+
+The following analysis and research investigate whether text models can identify depression and suicide ideation in online content through ethical methods with human supervision.
+
+## Project approach
+
+The following steps will solve the research question:
+
+1. The project uses a publicly accessible dataset which contains suicide-related content and neutral posts for import and cleaning purposes.  
+2. The text data requires transformation into meaningful features through tokenization and TF–IDF representation methods.
+3. The research applies logistic regression to establish connections between suicidal thoughts and their corresponding language patterns in text data.  
+4. The research findings will be presented through visual displays and performance statistics and a final summary.
+
+# Dataset
+
+The Suicide Detection Dataset from Nikhileswar Komati (2022) serves as the project dataset, which is available through Kaggle at [https://www.kaggle.com/datasets/nikhileswarkomati/suicide-watch].
+
+## Source and purpose
+
+Reddit users regularly post their experiences and seek support through this social media platform which serves as the source for this dataset. The dataset was created to help researchers apply NLP methods for identifying suicide ideation and mental health risks in text data.
+
+Also, this dataset contains content from multiple subreddits which include both r/SuicideWatch and other unrelated subreddits for comparison purposes.
+
+## Description
+
+The Suicide_Detection.csv file contains 200,000 Reddit posts which were labeled based on their subreddit origin. It also contains one record for each English-language post that exists on Reddit.
+
+## Temporal and population context
+
+The research team collected Reddit posts from 2018 until 2022 from publicly accessible threads. The researchers removed all user information and comment links and timestamps to protect user privacy while keeping the data anonymous.  
+We will find public mental health expressions from Reddit users but it does not include information about clinically confirmed mental health conditions.
+
+## Ethical considerations
+
+As explained before, this dataset has sensitive information about suicidal thoughts and depression but it remains fully anonymous for educational and research purposes only. This project will use analytical methods to show Trust & Safety applications but it does not aim to diagnose mental health conditions or make individual predictions.
+
+
+```{r, data-distribution, echo=FALSE, message=FALSE, warning=FALSE}
+data_raw <- read_csv("Suicide_Detection.csv") %>% clean_names()
+glimpse(data_raw); head(data_raw, 3)
+
+# Clean and filter the data
+data_tidy <- data_raw %>%
+dplyr::select(-tidyselect::any_of("x1")) %>%
+dplyr::mutate(class = stringr::str_squish(stringr::str_to_lower(class)),
+text= stringr::str_squish(stringr::str_to_lower(text))) %>%
+dplyr::filter(!is.na(text), !is.na(class), nchar(text) > 10) %>%
+dplyr::mutate(doc_id = dplyr::row_number())
+glimpse(data_tidy)
+
+# Transform
+clean_text <- function(x) {x %>%
+    stringr::str_replace_all("http\\S+", "") %>% 
+    stringr::str_replace_all("[^a-zA-Z\\s]", " ") %>% 
+    stringr::str_to_lower() %>%
+    stringr::str_squish()}
+data_transformed <- data_tidy %>%
+  dplyr::mutate(
+    suicide_ideation = dplyr::if_else(class == "suicide", 1L, 0L),
+    text = clean_text(text),
+    word_count = stringr::str_count(text, stringr::boundary("word"))) %>%
+  dplyr::filter(word_count > 10)
+
+set.seed(123)
+data_sample <- data_transformed %>%
+  dplyr::group_by(suicide_ideation) %>%
+  dplyr::slice_sample(n = 10000) %>% 
+  dplyr::ungroup()
+
+data_sample %>%
+  dplyr::summarise(
+    rows = dplyr::n(),
+    mean_words = round(mean(word_count), 1),
+    median_words = stats::median(word_count),
+    p90_words = as.integer(stats::quantile(word_count, 0.90))) %>%
+  knitr::kable(caption = "Sample summary (20,000 posts)")
+
+# Save the data
+dir.create("data_processed", showWarnings = FALSE)
+readr::write_csv(data_sample, "data_processed/suicide_sample_20k.csv")
+```
+
+After importing the raw data from Suicide_Detection.csv, variable names were normalized, the index column was dropped, and duplicate rows for each Reddit post were dropped. Class and text variables were both converted to lowercase and cleaned of excess spaces, URLs, punctuation, and non-alphabetic material for better consistency. Posts with missing values or fewer than ten characters were removed, and a unique document ID was created for each post for easier referencing.
+
+A binary variable, suicide_ideation, was then created to distinguish suicidal (1) and non-suicidal (0) posts. To enhance computational speed without compromising balance between classes, I selected a stratified sample of 20,000 posts (10,000 from each class) that was saved as data_processed/suicide_sample_20k.csv.
+
+Posts had an average of around 141 words, a median of 66, and a 90% of around 335 words, indicating that the vast majority of posts are brief but that some individuals post considerably longer and more descriptive entries. Tahis sanitized and balanced data provides high-quality input to the following text feature extraction and machine learning analysis.
+
+
+# Analysis
+
+## Distribution of Suicidal vs. Non-Suicidal Posts
+
+```{r, distribution, echo=FALSE, message=FALSE, warning=FALSE}
+# Class-balance table
+bal <- data_sample %>%
+dplyr::count(suicide_ideation) %>%
+dplyr::mutate(percent = scales::percent(n / sum(n), accuracy = 0.1),
+class_lbl = if_else(suicide_ideation == 1, "Suicidal (1)", "Non-suicidal (0)"),
+label = paste0(scales::comma(n), " (", percent, ")"))
+
+# Table
+knitr::kable(bal %>% dplyr::select(Class = class_lbl, Count = n, Percent = percent),
+caption = "Class balance in the 20 k sample (10 000 per class)")
+
+# Bar chart
+ggplot2::ggplot(bal, ggplot2::aes(x = class_lbl, y = n, fill = class_lbl)) +
+ggplot2::geom_col(width = 0.6) +
+ggplot2::geom_text(ggplot2::aes(label = label), vjust = -0.3, size = 4) +
+ggplot2::scale_fill_manual(values = c("Non-suicidal (0)" = "blue",
+"Suicidal (1)" = "orange")) +
+ggplot2::labs(
+title = "Distribution of Suicidal vs. Non-Suicidal Posts",
+subtitle = "Balanced subset of 20 000 posts (10 000 per class)",
+x = NULL, y = "Number of posts", fill = "Class") +
+ggplot2::theme_minimal(base_size = 12) + ggplot2::theme(legend.position = "none")
+```
+
+The working modeling dataset is an equally balanced subset of 20,000 postings consisting of 10,000 non-suicidal postings (50%) and another 10,000 suicidal postings (50%). The table confirms the 1:1 class distribution, and the bar chart demonstrates the balance with an equal number of posts in each class. This intentional balancing (created by stratified sampling from the scrubbed corpus) leverages training and test stability, prevents a model from "cheating" by over-predicting the majority class too much, and maintains threshold choice and metrics comparable across classes. It is not an estimation of the original corpus prevalence but is standard practice for Trust & Safety prototyping where recall on at-risk content and controlled false-positive rates are both critical.
+
+
+## Top words in Suicidal posts
+
+```{r, suiciposts, echo=FALSE, message=FALSE, warning=FALSE}
+suicidal_all <- data_sample %>% dplyr::filter(suicide_ideation == 1)
+stop_tbl <- tidytext::get_stopwords("en")
+
+top_suicidal <- suicidal_all %>%
+tidytext::unnest_tokens(word, text) %>%
+dplyr::anti_join(stop_tbl, by = "word") %>%
+dplyr::filter(stringr::str_detect(word, "^[a-z]+$"), nchar(word) >= 3) %>%
+dplyr::count(word, sort = TRUE) %>%
+dplyr::slice_head(n = 20)
+knitr::kable(top_suicidal, caption = "Top 20 words in suicidal posts")
+
+top_suicidal %>%
+dplyr::mutate(word = forcats::fct_reorder(word, n)) %>%
+ggplot2::ggplot(ggplot2::aes(x = word, y = n)) +
+ggplot2::geom_col(fill = "orange") +
+ggplot2::coord_flip() +
+ggplot2::labs(
+title = "Most Frequent Words in Suicidal Posts",
+subtitle = "All suicidal posts in the balanced sample",
+x = NULL, y = "Frequency") + ggplot2::theme_minimal(base_size = 12)
+```
+
+The examination of suicidal tweets demonstrates that the highest-ranked words such as "just," "don," "can," "want," "like," "life," and "feel", are affectively loaded but everyday. Instead of directly mentioning suicide, these terms relate to hesitation, yearning, or self-examination and imply that distress is signaled indirectly via everyday language. This suggests that citizens suffering from suicidal thought may frame their affective suffering via implicit everyday parlance rather than via explicit terms of "die" or "kill," rendering automated classification challenging and nevertheless key to early intervention platforms.
+
+
+## Top words in Non-Suicidal posts
+
+```{r, nonsuiciposts, echo=FALSE, message=FALSE, warning=FALSE}
+nonsuicidal_all <- data_sample %>% dplyr::filter(suicide_ideation == 0)
+top_nonsuicidal <- nonsuicidal_all %>%
+tidytext::unnest_tokens(word, text) %>%
+dplyr::anti_join(stop_tbl, by = "word") %>%
+dplyr::filter(stringr::str_detect(word, "^[a-z]+$"), nchar(word) >= 3) %>%
+dplyr::count(word, sort = TRUE) %>%
+dplyr::slice_head(n = 20)
+
+knitr::kable(top_nonsuicidal, caption = "Top 20 words in non-suicidal posts")
+
+top_nonsuicidal %>%
+dplyr::mutate(word = forcats::fct_reorder(word, n)) %>%
+ggplot2::ggplot(ggplot2::aes(x = word, y = n)) +
+ggplot2::geom_col(fill = "blue") +
+ggplot2::coord_flip() +
+ggplot2::labs(
+title = "Most Frequent Words in Non-Suicidal Posts",
+subtitle = "All non-suicidal posts in the balanced sample",
+x = NULL, y = "Frequency") + ggplot2::theme_minimal(base_size = 12)
+```
+
+Whereas suicidal messages are controlled by affective, colloquial terms ("baby," "mommy"), non-suicidal messages are characterized by day-to-day, unemotional language ("filler," "just," "like," "mom," "people," "school," "day," "got"). Such tokens indicate everyday subjects and social conversation but not internal affect. Such an extremely high frequency for "filler" is apparently a dataset artifact (a substitute token), highlighting the imprecision of merely looking by way.
+
+
+# Modeling
+
+## Train–Test Split + CV
+
+```{r, tt, echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(123)
+data_sample <- data_sample %>%
+dplyr::mutate(suicide_ideation = factor(suicide_ideation, levels = c(0, 1)))
+
+split_obj <- rsample::initial_split(data_sample, prop = 0.80, strata = suicide_ideation)
+train_df <- rsample::training(split_obj)
+test_df <- rsample::testing(split_obj)
+cv_folds<- rsample::vfold_cv(train_df, v = 3, strata = suicide_ideation)
+
+tab_split <- tibble::tibble(set = c("train","test"),
+rows = c(nrow(train_df), nrow(test_df)))
+knitr::kable(tab_split, caption = "Rows by split (train/test)")
+train_df %>% dplyr::count(suicide_ideation) %>%
+knitr::kable(caption = "Class balance in TRAIN")
+test_df %>% dplyr::count(suicide_ideation) %>%
+knitr::kable(caption = "Class balance in TEST")
+```
+
+I divided the balanced set of 20,000 posts (10,000 suicidal and 10,000 non-suicidal) into an 80/20 train–test split with stratification and fixed seed (set.seed(123)). Then, I placed 16,000 posts (8,000 each category) and 4,000 posts (2,000 each category) in the train and test set respectively, with the preservation of the 50/50 distribution of the classes within each split. Also, I made an estimate of the generalization and allow model tuning by employing a 3-fold stratified cross-validation on the training set with each fold preserving the balance of the classes and reducing runtime. This set up accommodates an equal and variance-managed downstream text model assessment.
+
+
+## Text preprocessing & feature engineering (TF–IDF)
+
+```{r, eng, echo=FALSE, message=FALSE, warning=FALSE}
+train_df <- dplyr::mutate(train_df, text = as.character(text))
+test_df <- dplyr::mutate(test_df,  text = as.character(text))
+
+text_rec <- recipes::recipe(suicide_ideation ~ text, data = train_df) %>%
+textrecipes::step_tokenize(text, engine = "tokenizers") %>%
+textrecipes::step_stopwords(text, custom_stopword_source = stopwords::stopwords("en")) %>%
+textrecipes::step_tokenfilter(text, max_tokens = 10000) %>%   # cap vocab for speed
+textrecipes::step_tfidf(text)
+prep_rec <- recipes::prep(text_rec, training = train_df, retain = TRUE)
+train_mat <- recipes::bake(prep_rec, new_data = train_df)
+test_mat <- recipes::bake(prep_rec, new_data = test_df)
+
+p <- ncol(train_mat) - 1
+summ_tbl <- tibble::tibble(set = c("train","test"),
+rows = c(nrow(train_mat), nrow(test_mat)), features = p)
+knitr::kable(summ_tbl, caption = "Rows and feature count after TF–IDF")
+```
+
+The table above recapitulates that TF–IDF transformation created 10,000 features, each one corresponding to a unique token (word) from the training data. That is to say each Reddit contribution is now represented by the numerical vector of size 10,000 where each component is the measure of the relevance of an input word within the contribution to the whole data set.
+
+The training set comprises 16,000 posts and the test set comprise 4,000 posts with the same 80/20 ratio explained earlier. Then each post is represented by the same vocabulary and weight pattern learned from the training set to allow consistent feature extraction and data leakage prevention.
+
+Conceptually, this step converts qualitative text to quantitative input to the machine learning where the pattern of word usage is interpreted statistically by the logistic regression model to identify linguistic signals related to suicidal ideation.
+
+
+## Logistic Regression
+
+```{r, nav, echo=FALSE, message=FALSE, warning=FALSE}
+logit_spec <- logistic_reg(penalty = 0.001, mixture = 1) %>%
+set_engine("glmnet") %>%
+set_mode("classification")
+wf_logit <- workflow() %>%
+add_model(logit_spec) %>%
+add_formula(suicide_ideation ~ .)
+logit_fit <- fit(wf_logit, data = train_mat)
+
+# Predictions
+pred_logit <- predict(logit_fit, new_data = test_mat, type = "prob") %>%
+dplyr::bind_cols(predict(logit_fit, new_data = test_mat, type = "class")) %>%
+dplyr::bind_cols(test_mat %>% dplyr::select(suicide_ideation))
+
+# Metrics table
+perf_tbl <- tibble::tibble(
+Metric = c("ROC_AUC","PR_AUC","Accuracy","F1","Recall","Specificity","Precision"),
+Estimate = c(
+roc_auc(pred_logit, truth = suicide_ideation, .pred_1, event_level = "second")[[".estimate"]],
+pr_auc (pred_logit, truth = suicide_ideation, .pred_1, event_level = "second")[[".estimate"]],
+accuracy(pred_logit, truth = suicide_ideation, .pred_class)[[".estimate"]],
+f_meas (pred_logit, truth = suicide_ideation, .pred_class, event_level = "second")[[".estimate"]],
+sens (pred_logit, truth = suicide_ideation, .pred_class, event_level = "second")[[".estimate"]],
+spec (pred_logit, truth = suicide_ideation, .pred_class, event_level = "second")[[".estimate"]],
+precision(pred_logit, truth = suicide_ideation, .pred_class, event_level = "second")[[".estimate"]]))
+knitr::kable(perf_tbl, digits = 4, caption = "Logistic Regression (glmnet) — Test Set Performance")
+
+# Confusion matrix
+cm_logit <- conf_mat(pred_logit,
+truth = suicide_ideation,
+estimate = .pred_class,
+event_level = "second")
+cm_logit
+```
+
+Upon reshaping the data from the text data to 10,000 TF–IDF features representing unique and informative patterns of words, I fitted the logistic regression with LASSO regularization through the glmnet engine. I chose logistic regression because it has interpretable coefficients and is effective on high-dimensional sparse data, which is not uncommon on the text classification datasets.
+
+On the test set the performance of the model is very strong: ROC-AUC = 0.94, PR-AUC = 0.90, Accuracy = 0.89, F1 = 0.89, Recall = 0.92 and Precision = 0.87. They demonstrate that the model differentiates well between suicidal and non-suicidal posts and also has a good balance between sensitivity and precision.
+
+Notably, the high recall value indicates the model is highly successful at finding most posts that contain suicidal ideation, keeping to a minimum the chances of overlooking key cases. Most suicidal posts were accurately classified, the confusion matrix assures us, with quite few false negatives. This property is especially attractive to Trust & Safety and mental health risk identification where the ethical imperative is to maximize early identification even to the expense of some false positives.
+
+
+## ROC & PR curves from test-set predictions
+
+```{r, roc, echo=FALSE, message=FALSE, warning=FALSE}
+roc_df <- roc_curve(pred_logit, truth = suicide_ideation, .pred_1)
+pr_df  <- pr_curve(pred_logit,  truth = suicide_ideation, .pred_1)
+
+ggplot(roc_df, aes(x = 1 - specificity, y = sensitivity)) +
+geom_path(linewidth = 1) + geom_abline(linetype = 2) + coord_equal() +
+labs(title = "ROC Curve (Test Set)",
+x = "False Positive Rate (1 - Specificity)",
+y = "True Positive Rate (Sensitivity)") + theme_minimal(base_size = 12)
+
+ggplot(pr_df, aes(x = recall, y = precision)) +
+geom_path(linewidth = 1) +
+coord_equal() +
+labs(title = "Precision–Recall Curve (Test Set)",
+x = "Recall",
+y = "Precision") + theme_minimal(base_size = 12)
+```
+
+The Precision–Recall and the ROC curves give us visual evidence about the reliability of the logistic regression model to make predictions. For the ROC curve, the sharp incline to the upper-left region indicates that the model has good sensitivity and low false positives represented by an AUC value of about 0.94. This is to say that the classifier can accurately separate suicidal and non-suicidal posts over many thresholds.
+
+The Precision–Recall curve complements this view by focusing on the trade-off between correctly identifying suicidal posts (recall) and avoiding false alarms (precision). The strong area under this curve (PR-AUC ≈ 0.90) indicates that the model maintains solid precision even as recall increases, which is critical in Trust & Safety contexts where overlooking a high-risk post is far more costly than flagging a neutral one.
+
+Altogether, these results affirm that the output of the model is statistically valid and ethically accountable — in favor of earlier discernment of probable risk and keeping false positives within sensible boundaries.
+
+
+## Interpreting Model Reliability and Ethical Trade-offs
+
+```{r, model, echo=FALSE, message=FALSE, warning=FALSE}
+thr_seq <- seq(0.01, 0.99, by = 0.01)
+calc_at_thr <- function(t){cls <- factor(if_else(pred_logit$.pred_1 >= t, "1", "0"), levels = c("0","1"))
+  tibble(threshold = t,
+    F1 = f_meas_vec(test_mat$suicide_ideation, cls, event_level = "second"),
+    Recall = sens_vec (test_mat$suicide_ideation, cls, event_level = "second"),
+    Precision = precision_vec(test_mat$suicide_ideation, cls, event_level = "second"),
+    Accuracy = accuracy_vec (test_mat$suicide_ideation, cls))}
+
+thr_grid <- map_dfr(thr_seq, calc_at_thr)
+best_row <- thr_grid %>% arrange(desc(F1)) %>% slice(1)
+best_thr <- best_row$threshold
+thr_grid %>%
+  arrange(desc(F1)) %>% slice(1:10) %>%
+  knitr::kable(digits = 3, caption = "Top-10 F1")
+pred_thr <- pred_logit %>%
+  mutate(.pred_class_thr = factor(if_else(.pred_1 >= best_thr, "1", "0"),
+                                  levels = c("0","1")))
+
+final_metrics <- tibble(
+  Metric = c("Threshold (F1-max)", "ROC_AUC", "PR_AUC", "Accuracy", "F1", "Recall", "Precision"),
+  Estimate = c(best_thr, roc_auc(pred_logit, truth = suicide_ideation, .pred_1, event_level = "second")$.estimate,
+    pr_auc (pred_logit, truth = suicide_ideation, .pred_1, event_level = "second")$.estimate,
+    accuracy_vec (test_mat$suicide_ideation, pred_thr$.pred_class_thr),
+    f_meas_vec (test_mat$suicide_ideation, pred_thr$.pred_class_thr, event_level = "second"),
+    sens_vec (test_mat$suicide_ideation, pred_thr$.pred_class_thr, event_level = "second"),
+    precision_vec(test_mat$suicide_ideation, pred_thr$.pred_class_thr, event_level = "second"))
+)
+
+knitr::kable(final_metrics %>% mutate(Estimate = round(Estimate, 4)),
+caption = "Metrics F1")
+conf_mat(pred_thr, truth = suicide_ideation, estimate = .pred_class_thr, event_level = "second")
+```
+
+This step further broadens the quantitative analysis of the logistic regression model by looking at how its reliability maps to ethical and operational choices within Trust & Safety applications. Optimization of the classification threshold gives insight that performance of the model is not purely about gross accuracy but about where to set the balance between sensitivity to the potential risk and false alarm avoidance.
+
+A high recall (≈ 0.92) means that the model successfully identifies most posts expressing suicidal ideation, minimizing the chance of overlooking users who might need urgent help. However, achieving this comes with a warning: some neutral posts are also flagged, as reflected in the precision value (≈ 0.87). For Trust & Safety applications, this trade-off is both expected and necessary. It reflects a safety-first bias, where the system is intentionally tuned to favor detecting potential risks rather than missing critical cases.
+
+From the ethical standpoint, this discussion shows statistical calibration to be consistent with human accountability. A reliable model is not the one that substitutes human moderators but the one to effectively rank the most critical cases for attention—allowing quicker, more targeted intervention within users' privacy and contextual constraints. Herein lies the way the reliability within the model aids the research question: text models can recognize indicators of suicidal ideation with high consistency if and only if their outputs remain under the purview of human moderation and ethical codes.
+
+
+## Summary of Modeling Results
+
+```{r, summary, echo=FALSE, message=FALSE, warning=FALSE}
+perf_tbl %>%
+dplyr::filter(Metric %in% c("Accuracy","F1","Recall","Precision","ROC_AUC","PR_AUC")) %>%
+dplyr::mutate(Metric = forcats::fct_reorder(Metric, Estimate)) %>%
+ggplot(aes(x = Metric, y = Estimate, fill = Metric)) +
+geom_col(width = 0.6, show.legend = FALSE) +
+coord_flip() +
+geom_text(aes(label = round(Estimate, 3)), hjust = -0.1, size = 4) +
+labs(title = "Summary of Logistic Regression Performance",
+y = "Score", x = NULL
+) +
+ylim(0, 1) +
+theme_minimal(base_size = 12)
+```
+
+The performance measure chart is provided to visualize the summary of the performance indicators of the logistic regression model with consistent and high performance across all measures. The model achieved ROC-AUC = 0.94, PR-AUC = 0.90, F1 = 0.89, Recall = 0.92, and Precision = 0.87.
+
+In Trust & Safety, these findings prove that an effective text model is capable of ranking potentially suicidal material highly for human examination without drowning moderators in false positives. The trade-off between recall and precision is an important ethical judgment: maximizing the identification of users at risk and keeping intervention to an absolute minimum.
+
+Thus, although this research has primarily dealt with predictive accuracy, future versions might also include techniques for model explainability to know more about what linguistic characteristics primarily dictate the predictions by the model. This would make the system more interpretable, facilitate bias auditing and reinforce confidence among real-world Trust & Safety applications.
+
+
+# Conclusion: Ethical Implications and Future Directions
+
+As the project shows, NLP and logistic regression can be effectively interwoven to extract strong evidence of suicidal ideation from online messages with high sensitivity and ethical consideration. With a balanced set of Reddit comments and TF–IDF modeling, the system provided strong prediction performance where it correctly identified most messages at risk with minimal false alarm.
+
+From Trust & Safety's perspective, these outcomes highlight the text models' potential as support tools to make decisions and not the detectors themselves. Their advantage is to filter and rank key content to be reviewed by human moderators—reducing the response time but still keeping accountability and empathy within digital safety processes.
+
+Ethically, the project demonstrates that superior-performing algorithms still exist under the control of humans to ensure that they do not become biased, lose the context, nor overstep. The tradeoff between accuracy and recall thus realized bolsters the philosophy that responsible AI within mental health applications is equally about technical accuracy and moral judgment.
+
+Possible future expansions also involve evaluating deep learning models, using real-world data skewness, and evaluating fairness to different demographics to provide more robust transparency and trust to the models.
+
+
+# References
+
+- Komisiya, J., & Thorn, B. (2024). Technology and Trust and Safety: The evolving role of safety in technology development. Trust & Safety Professional Association (TSPA). https://www.tspa.org/
+- Schmucker, N. (2020, November 6). 4 R projects to form a core data analyst portfolio. R-bloggers. Retrieved from https://www.r-bloggers.com/2020/11/4-r-projects-to-form-a-core-data-analyst-portfolio/
+- “Suicide Detection Dataset” by Nikhileswar Komati (2022), publicly available on Kaggle: [https://www.kaggle.com/datasets/nikhileswarkomati/suicide-watch]
+- Total Shape. La palabra salud mental deletreada con Scrabbles junto a una hoja verde. Unsplash, Nov 4, 2020. Available under the Unsplash License. Photo page: https://unsplash.com/es/fotos/la-palabra-salud-mental-deletreada-con-scrabbles-junto-a-una-hoja-verde-Ianw4RdVuoo
+

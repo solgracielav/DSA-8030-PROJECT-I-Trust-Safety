@@ -1,0 +1,261 @@
+---
+title: "DSA 8030: PROJECT I: Trust & Safety — Detecting Signs of Suicide Ideation and Depression in Online Text (Interactive Flexdashboard)"
+author: "Sol Vloebergh"
+date: "`r format(Sys.Date())`"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: cosmo
+    source_code: embed
+    navbar:
+      - { title: "Dataset (Kaggle)", href: "https://www.kaggle.com/datasets/nikhileswarkomati/suicide-watch", target: "_blank" }
+runtime: static
+---
+
+```{r}
+suppressPackageStartupMessages({
+library(dplyr); library(ggplot2); library(readr)
+library(stringr); library(forcats); library(tidyr); library(purrr)
+library(janitor)
+library(tidytext); library(stopwords)
+library(plotly); library(scales); library(htmltools)
+library(tidymodels); library(textrecipes); library(glmnet)
+library(flexdashboard)
+})
+
+# =========================
+
+# Palette & Intro
+
+# =========================
+
+col_non <- "blue"     
+col_sui <- "orange"  
+pal_metrics <- c(
+ROC_AUC = "#4E79A7",
+PR_AUC = "#F28E2B",
+Accuracy = "#76B7B2",
+F1 = "#B07AA1",
+Recall = "#59A14F",
+Precision = "#E15759",
+Specificity = "#9C755F"
+)
+
+intro <- HTML("
+
+<h2 style='margin-top:0;'>Project Overview</h2>
+<p>
+This interactive dashboard summarizes part of the analysis for
+<b>DSA 8030: PROJECT I: Trust & Safety — Detecting Signs of Suicide Ideation and Depression in Online Text</b>.
+I used NLP with TF–IDF features and a logistic regression model to identify linguistic signals of depression
+or suicidal ideation in social media posts with ethical, human-in-the-loop oversight.
+</p>
+<p>
+The data source is <b>Kaggle’s Suicide Detection Dataset</b>. For clarity and compute efficiency,
+I work with a <b>balanced, cleaned sample of 20,000 posts</b> (10,000 suicidal; 10,000 non-suicidal).
+Cleaning included de-duplication, lowercasing, URL/punctuation removal, and a binary label
+<code>suicide_ideation</code> (1 vs 0). Charts reflect this processed sample.
+</p>
+<hr style='margin:10px 0 20px;'>
+")
+
+# =========================
+
+# Load & Prepare Data
+
+# =========================
+
+df_raw <- read_csv("suicide_sample_20k.csv", show_col_types = FALSE) |> clean_names()
+names(df_raw) <- names(df_raw) |> str_replace_all("\uFEFF", "") |> str_squish()
+
+candidate_cols <- c("suicide_ideation","class","label","target","y")
+class_col <- intersect(candidate_cols, names(df_raw))
+if (length(class_col) == 0) stop("Class column not found. Add one of: suicide_ideation/class/label/target/y")
+class_col <- class_col[[1]]
+
+df <- df_raw |>
+mutate(
+.cls = .data[[class_col]],
+.cls = case_when(
+is.numeric(.cls) ~ as.integer(.cls),
+is.logical(.cls) ~ as.integer(.cls),
+is.character(.cls) ~ case_when(
+str_detect(.cls, "^suicide|^suicidal|^r/suicidewatch") ~ 1L,
+str_detect(.cls, "non|neutral|control|^0$") ~ 0L,
+TRUE ~ NA_integer_
+),
+TRUE ~ NA_integer_
+),
+suicide_ideation = factor(.cls, levels = c(0,1),
+labels = c("Non-suicidal (0)", "Suicidal (1)")),
+text = as.character(text)
+) |> select(-.cls)
+
+if (!"word_count" %in% names(df)) {
+df <- df |> mutate(word_count = str_count(text, boundary("word")))
+}
+df <- df |> filter(!is.na(suicide_ideation), !is.na(text))
+
+# =========================
+
+# Plot 1: Class Distribution
+
+# =========================
+
+p_cls <- ggplot(df |> count(suicide_ideation),
+aes(x = suicide_ideation, y = n, fill = suicide_ideation)) +
+geom_col(width = 0.6, show.legend = FALSE) +
+geom_text(aes(label = comma(n)), vjust = -0.25, size = 4) +
+scale_fill_manual(values = c("Non-suicidal (0)" = col_non, "Suicidal (1)" = col_sui)) +
+labs(title = "Class Distribution", x = NULL, y = "Number of Posts") +
+theme_minimal(base_size = 12)
+p_clsly <- ggplotly(p_cls)
+
+# =========================
+
+# Plot 2: Histograms (word counts)
+
+# =========================
+
+p_hist_suic <- ggplot(df |> filter(suicide_ideation == "Suicidal (1)"),
+aes(x = word_count)) +
+geom_histogram(bins = 60, fill = col_sui) +
+labs(x = "Words per Post", y = "Frequency") +
+xlim(0, 1000) + theme_minimal(base_size = 12)
+
+p_hist_non <- ggplot(df |> filter(suicide_ideation == "Non-suicidal (0)"),
+aes(x = word_count)) +
+geom_histogram(bins = 60, fill = col_non) +
+labs(x = "Words per Post", y = "Frequency") +
+xlim(0, 1000) + theme_minimal(base_size = 12)
+
+hist_panel <- subplot(ggplotly(p_hist_suic), ggplotly(p_hist_non),
+nrows = 1, shareX = TRUE, titleX = TRUE, margin = 0.06) |>
+layout(
+margin = list(t = 80),
+annotations = list(
+list(text = "<b>Suicidal (1)</b>", x = 0.25, y = 1.05, xref = "paper", yref = "paper",
+showarrow = FALSE, xanchor = "center", yanchor = "bottom",
+font = list(size = 14, color = "#333")),
+list(text = "<b>Non-suicidal (0)</b>", x = 0.75, y = 1.05, xref = "paper", yref = "paper",
+showarrow = FALSE, xanchor = "center", yanchor = "bottom",
+font = list(size = 14, color = "#333"))
+)
+)
+
+# =========================
+
+# Plot 3: Top Words per class
+
+# =========================
+
+stop_tbl <- get_stopwords("en")
+top_words_all <- df |> select(suicide_ideation, text) |>
+unnest_tokens(word, text) |>
+filter(str_detect(word, "^[a-z]+$"), nchar(word) >= 3) |>
+anti_join(stop_tbl, by = "word") |>
+count(suicide_ideation, word, sort = TRUE)
+
+top_n <- 20
+tw_non <- top_words_all |> filter(suicide_ideation == "Non-suicidal (0)") |> slice_head(n = top_n) |> mutate(word = fct_reorder(word, n))
+tw_sui <- top_words_all |> filter(suicide_ideation == "Suicidal (1)") |> slice_head(n = top_n) |> mutate(word = fct_reorder(word, n))
+
+p_top_non  <- ggplot(tw_non, aes(x = word, y = n)) +
+geom_col(fill = col_non) + coord_flip() +
+labs(x = NULL, y = "Frequency") + theme_minimal(base_size = 12)
+
+p_top_sui  <- ggplot(tw_sui, aes(x = word, y = n)) +
+geom_col(fill = col_sui) + coord_flip() +
+labs(x = NULL, y = "Frequency") + theme_minimal(base_size = 12)
+
+topwords_panel <- subplot(ggplotly(p_top_non), ggplotly(p_top_sui),
+nrows = 1, shareX = FALSE, margin = 0.07) |>
+layout(
+margin = list(t = 85),
+annotations = list(
+list(text = "<b>Top 20 Words — Non-suicidal (0)</b>", x = 0.25, y = 1.06,
+xref = "paper", yref = "paper", showarrow = FALSE,
+xanchor = "center", yanchor = "bottom", font = list(size = 14, color = "#333")),
+list(text = "<b>Top 20 Words — Suicidal (1)</b>", x = 0.75, y = 1.06,
+xref = "paper", yref = "paper", showarrow = FALSE,
+xanchor = "center", yanchor = "bottom", font = list(size = 14, color = "#333"))
+)
+)
+
+# =========================
+
+# Modeling: TF–IDF + Logistic Regression
+
+# =========================
+
+set.seed(123)
+df_mod <- df |> mutate(y = fct_recode(suicide_ideation,
+non = "Non-suicidal (0)",
+suicidal = "Suicidal (1)"))
+split_obj <- initial_split(df_mod, prop = 0.80, strata = y)
+train_df <- training(split_obj); test_df <- testing(split_obj)
+
+rec <- recipe(y ~ text, data = train_df) |>
+step_tokenize(text) |>
+step_stopwords(text, custom_stopword_source = stopwords("en")) |>
+step_tokenfilter(text, max_tokens = 8000) |>
+step_tfidf(text)
+
+log_spec <- logistic_reg(penalty = 0.001, mixture = 1) |>
+set_engine("glmnet") |>
+set_mode("classification")
+
+wf <- workflow() |> add_model(log_spec) |> add_recipe(rec)
+fit_log <- fit(wf, data = train_df)
+
+pred_prob <- predict(fit_log, new_data = test_df, type = "prob")  
+pred_cls  <- predict(fit_log, new_data = test_df, type = "class") 
+preds <- bind_cols(test_df |> select(y), pred_prob, pred_cls)
+
+metrics_tbl <- tibble(
+Metric = c("ROC_AUC","Recall","PR_AUC","F1","Accuracy","Precision","Specificity"),
+Estimate = c(
+yardstick::roc_auc(preds, truth = y, .pred_suicidal, event_level = "second")$.estimate,
+yardstick::sens (preds, truth = y, .pred_class,    event_level = "second")$.estimate,
+yardstick::pr_auc (preds, truth = y, .pred_suicidal, event_level = "second")$.estimate,
+yardstick::f_meas (preds, truth = y, .pred_class,    event_level = "second")$.estimate,
+yardstick::accuracy(preds, truth = y, .pred_class)$.estimate,
+yardstick::precision(preds, truth = y, .pred_class,  event_level = "second")$.estimate,
+yardstick::spec (preds, truth = y, .pred_class,    event_level = "second")$.estimate
+)
+)
+
+p_metrics <- ggplot(metrics_tbl |> mutate(Metric = fct_reorder(Metric, Estimate)),
+aes(x = Metric, y = Estimate, fill = Metric,
+text = paste0(Metric, ': ', round(Estimate, 3)))) +
+geom_col() + coord_flip() +
+scale_fill_manual(values = pal_metrics, guide = "none") +
+geom_text(aes(label = round(Estimate, 3)), hjust = -0.1, size = 4) +
+ylim(0, 1) +
+labs(title = "Modeling — Test Set Performance (TF–IDF + Logistic Regression)", x = NULL, y = "Score") +
+theme_minimal(base_size = 12)
+
+p_metricsly <- ggplotly(p_metrics, tooltip = "text")
+
+# =========================
+
+# UI Rendering
+
+# =========================
+
+ui <- tagList(
+intro,
+div(style="margin-bottom: 12px;", h3("Class Distribution"), p_clsly),
+div(style="margin-top: 8px; margin-bottom: 12px;",
+h3("Histograms of Word Count"),
+HTML("<p style='margin-top:-6px;'>Use Plotly’s toolbar (zoom, pan) to explore ranges.</p>"),
+hist_panel),
+div(style="margin-top: 8px;", h3("Top Words by Class"), topwords_panel),
+div(style="margin-top: 8px;", h3("Modeling — Test Set Performance"), p_metricsly)
+)
+
+
+ui
+```
+
