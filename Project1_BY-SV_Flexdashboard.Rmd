@@ -217,12 +217,12 @@ metrics_tbl <- tibble(
 Metric = c("ROC_AUC","Recall","PR_AUC","F1","Accuracy","Precision","Specificity"),
 Estimate = c(
 yardstick::roc_auc(preds, truth = y, .pred_suicidal, event_level = "second")$.estimate,
-yardstick::sens (preds, truth = y, .pred_class,    event_level = "second")$.estimate,
+yardstick::sens (preds, truth = y, .pred_class, event_level = "second")$.estimate,
 yardstick::pr_auc (preds, truth = y, .pred_suicidal, event_level = "second")$.estimate,
-yardstick::f_meas (preds, truth = y, .pred_class,    event_level = "second")$.estimate,
+yardstick::f_meas (preds, truth = y, .pred_class, event_level = "second")$.estimate,
 yardstick::accuracy(preds, truth = y, .pred_class)$.estimate,
-yardstick::precision(preds, truth = y, .pred_class,  event_level = "second")$.estimate,
-yardstick::spec (preds, truth = y, .pred_class,    event_level = "second")$.estimate
+yardstick::precision(preds, truth = y, .pred_class, event_level = "second")$.estimate,
+yardstick::spec (preds, truth = y, .pred_class, event_level = "second")$.estimate
 )
 )
 
@@ -250,8 +250,7 @@ div(style="margin-bottom: 12px;", h3("Class Distribution"), p_clsly),
 div(style="margin-top: 8px; margin-bottom: 12px;",
 h3("Histograms of Word Count"),
 HTML("<p style='margin-top:-6px;'>Use Plotly’s toolbar (zoom, pan) to explore ranges.</p>"),
-hist_panel),
-div(style="margin-top: 8px;", h3("Top Words by Class"), topwords_panel),
+hist_panel), div(style="margin-top: 8px;", h3("Top Words by Class"), topwords_panel),
 div(style="margin-top: 8px;", h3("Modeling — Test Set Performance"), p_metricsly)
 )
 

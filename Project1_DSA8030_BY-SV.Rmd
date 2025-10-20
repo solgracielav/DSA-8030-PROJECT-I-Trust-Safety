@@ -34,7 +34,7 @@ The age of the digital has made mental health an integral issue that requires sp
 
 The following analysis utilizes NLP techniques constructed with the programming language R to identify depression and suicidal ideation from the written material on the internet. Also, machine learning models on texts are validated here to identify posts needing human analysis through analysis by these models based on hopeless comments and critical language and phrases expressing disinterest.
 
-My professional goal is to join the Trust & Safety team at Google to collaborate on projects related to internet safety safeguarding kids and minors on the internet. Research area is related to my academic interests on data analytics and business communications and my willingness to make the internet safer for vulnerable users.
+The research area selected for this project is related to my academic interests on data analytics and business communications and my willingness to make the internet safer for vulnerable users. My professional goal is to join the Trust & Safety team at Google to collaborate on projects related to internet safety safeguarding kids and minors on the internet. 
 
 ## Research question
 
@@ -307,7 +307,7 @@ Upon reshaping the data from the text data to 10,000 TF–IDF features represent
 
 On the test set the performance of the model is very strong: ROC-AUC = 0.94, PR-AUC = 0.90, Accuracy = 0.89, F1 = 0.89, Recall = 0.92 and Precision = 0.87. They demonstrate that the model differentiates well between suicidal and non-suicidal posts and also has a good balance between sensitivity and precision.
 
-Notably, the high recall value indicates the model is highly successful at finding most posts that contain suicidal ideation, keeping to a minimum the chances of overlooking key cases. Most suicidal posts were accurately classified, the confusion matrix assures us, with quite few false negatives. This property is especially attractive to Trust & Safety and mental health risk identification where the ethical imperative is to maximize early identification even to the expense of some false positives.
+Notably, the high recall value indicates the model is highly successful at finding most posts that contain suicidal ideation, keeping to a minimum the chances of overlooking key cases. Most suicidal posts were accurately classified, as the confusion matrix indicates, with quite few false negatives. This property is especially attractive to Trust & Safety and mental health risk identification where the ethical imperative is to maximize early identification even to the expense of some false positives.
 
 
 ## ROC & PR curves from test-set predictions
@@ -330,7 +330,7 @@ x = "Recall",
 y = "Precision") + theme_minimal(base_size = 12)
 ```
 
-The Precision–Recall and the ROC curves give us visual evidence about the reliability of the logistic regression model to make predictions. For the ROC curve, the sharp incline to the upper-left region indicates that the model has good sensitivity and low false positives represented by an AUC value of about 0.94. This is to say that the classifier can accurately separate suicidal and non-suicidal posts over many thresholds.
+The Precision–Recall and the ROC curves provides a visual evidence about the reliability of the logistic regression model to make predictions. For the ROC curve, the sharp incline to the upper-left region indicates that the model has good sensitivity and low false positives represented by an AUC value of about 0.94. This is to say that the classifier can accurately separate suicidal and non-suicidal posts over many thresholds.
 
 The Precision–Recall curve complements this view by focusing on the trade-off between correctly identifying suicidal posts (recall) and avoiding false alarms (precision). The strong area under this curve (PR-AUC ≈ 0.90) indicates that the model maintains solid precision even as recall increases, which is critical in Trust & Safety contexts where overlooking a high-risk post is far more costly than flagging a neutral one.
 
